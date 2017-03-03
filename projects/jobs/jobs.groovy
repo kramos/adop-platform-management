@@ -23,9 +23,6 @@ loadCartridgeJob.with{
           choiceListProvider {
             systemGroovyChoiceListProvider {
               scriptText('''
-              @Grab('org.yaml:snakeyaml:1.17')
-              import org.yaml.snakeyaml.Yaml
-              import org.yaml.snakeyaml.parser.ParserException
               import jenkins.model.*
 
               nodes = Jenkins.instance.globalNodeProperties
@@ -50,20 +47,16 @@ loadCartridgeJob.with{
                 try {
                   def html = source_url.toURL().text;
 
-                  Yaml parser = new Yaml();
-                  LinkedHashMap yaml = parser.load(html);
-
-                  yaml.each{ key, cartridge ->
-                    cartridge_urls.add(cartridge.url)
+                  html.eachLine { line ->
+                    if (line.contains("url:")) {
+                      def url = line.substring(line.indexOf("\\"") + 1, line.lastIndexOf("\\""))
+                      cartridge_urls.add(url)
+                    }
                   }
                 }
                 catch (UnknownHostException e) {
                   cartridge_urls.add("[ERROR] Provided URL was not found: ${source_url}");
                   println "[ERROR] Provided URL was not found: ${source_url}";
-                }
-                catch (ParserException e) {
-                  cartridge_urls.add("[ERROR] Provided URL has invalid YAML: ${source_url}");
-                  println "[ERROR] Provided URL has invalid YAML: ${source_url}";
                 }
                 catch (Exception e) {
                   cartridge_urls.add("[ERROR] Unknown error while processing: ${source_url}");
@@ -83,7 +76,6 @@ loadCartridgeJob.with{
         stringParam('CARTRIDGE_FOLDER', '', 'The folder within the project namespace where your cartridge will be loaded into.')
         stringParam('FOLDER_DISPLAY_NAME', '', 'Display name of the folder where the cartridge is loaded.')
         stringParam('FOLDER_DESCRIPTION', '', 'Description of the folder where the cartridge is loaded.')
-        stringParam('DOWNSTREAM_FOLDER', 'None', 'Optional parameter to support the ADOP Pipeine Builder.')
         booleanParam('ENABLE_CODE_REVIEW', false, 'Enables Gerrit Code Reviewing for the selected cartridge')
         booleanParam('OVERWRITE_REPOS', false, 'If ticked, existing code repositories (previously loaded by the cartridge) will be overwritten. For first time cartridge runs, this property is redundant and will perform the same behavior regardless.')
     }
@@ -110,6 +102,8 @@ git clone ${CARTRIDGE_CLONE_URL} cartridge
 
 # Find the cartridge
 export CART_HOME=$(dirname $(find -name metadata.cartridge | head -1))
+
+echo "CART_HOME=${CART_HOME}" > ${WORKSPACE}/carthome.properties
 
 # Check if the user has enabled Gerrit Code reviewing
 if [ "$ENABLE_CODE_REVIEW" == true ]; then
@@ -190,30 +184,42 @@ if [ -d ${WORKSPACE}/${CART_HOME}/jenkins/jobs ]; then
     fi
 fi
 ''')
-        systemGroovyCommand('''
-import jenkins.model.*
-import groovy.io.FileType
+        environmentVariables {
+          propertiesFile('${WORKSPACE}/carthome.properties')
+        }
+        systemGroovyCommand('''// XML LOAD
 
-def jenkinsInstace = Jenkins.instance
-def projectName = build.getEnvironment(listener).get('PROJECT_NAME')
-def mcfile = new FileNameFinder().getFileNames(build.getWorkspace().toString(), '**/metadata.cartridge')
-def xmlDir = new File(mcfile[0].substring(0, mcfile[0].lastIndexOf(File.separator))  + "/jenkins/jobs/xml")
+import jenkins.model.*;
+import groovy.io.FileType;
+import hudson.FilePath;
 
-def fileList = []
+def jenkinsInstace = Jenkins.instance;
+def projectName = build.getEnvironment(listener).get('PROJECT_NAME');
+def cartHome = build.getEnvironment(listener).get('CART_HOME');
+def workspace = build.workspace.toString();
+def cartridgeWorkspace = workspace + '/' + cartHome + '/jenkins/jobs/xml/';
+def channel = build.workspace.channel;
+FilePath filePath = new FilePath(channel, cartridgeWorkspace);
+List<FilePath> xmlFiles = filePath.list('**/*.xml');
 
-xmlDir.eachFileRecurse (FileType.FILES) { file ->
-    if(file.name.endsWith('.xml')) {
-        fileList << file
-    }
-}
-fileList.each {
-	String configPath = it.path
-  	File configFile = new File(configPath)
-    String configXml = configFile.text
-    ByteArrayInputStream xmlStream = new ByteArrayInputStream( configXml.getBytes() )
-    String jobName = configFile.getName().substring(0, configFile.getName().lastIndexOf('.'))
+xmlFiles.each {
+  File configFile = new File(it.toURI());
 
-    jenkinsInstace.getItem(projectName,jenkinsInstace).createProjectFromXML(jobName, xmlStream)
+  String configXml = it.readToString();
+
+  ByteArrayInputStream xmlStream = new ByteArrayInputStream(
+    configXml.getBytes());
+
+  String jobName = configFile.getName()
+  		.substring(0,
+                   configFile
+                   .getName()
+                   	.lastIndexOf('.'));
+
+  jenkinsInstace.getItem(projectName,jenkinsInstace)
+  	.createProjectFromXML(jobName, xmlStream);
+
+  println '[INFO] - Imported XML job config: ' + it.toURI();
 }
 ''')
         conditionalSteps {
@@ -239,7 +245,6 @@ fi
                     env('PROJECT_NAME',projectFolderName + '/${CARTRIDGE_FOLDER}')
                     env('FOLDER_DISPLAY_NAME','${FOLDER_DISPLAY_NAME}')
                     env('FOLDER_DESCRIPTION','${FOLDER_DESCRIPTION}')
-                    env('DOWNSTREAM_FOLDER','${DOWNSTREAM_FOLDER}')
                 }
                 dsl {
                     text('''// Creating folder to house the cartridge...
@@ -318,11 +323,8 @@ loadCartridgeCollectionJob.with{
 
         println("Loading cartridge inside folder: " + cartridge.folder)
         println("Cartridge URL: " + cartridge.url)
-        if (cartridge.down_stream != null) {
-            println("Cartridge Downstream Job: " + cartridge.downstream_folder)
-        }
 
-        build job: projectWorkspace+'/Cartridge_Management/Load_Cartridge', parameters: [[$class: 'StringParameterValue', name: 'CARTRIDGE_FOLDER', value: cartridge.folder], [$class: 'StringParameterValue', name: 'FOLDER_DISPLAY_NAME', value: cartridge.display_name], [$class: 'StringParameterValue', name: 'FOLDER_DESCRIPTION', value: cartridge.desc], [$class: 'StringParameterValue', name: 'CARTRIDGE_CLONE_URL', value: cartridge.url], [$class: 'StringParameterValue', name: 'DOWNSTREAM_FOLDER', value: cartridge.downstream_folder]]
+        build job: projectWorkspace+'/Cartridge_Management/Load_Cartridge', parameters: [[$class: 'StringParameterValue', name: 'CARTRIDGE_FOLDER', value: cartridge.folder], [$class: 'StringParameterValue', name: 'FOLDER_DISPLAY_NAME', value: cartridge.display_name], [$class: 'StringParameterValue', name: 'FOLDER_DESCRIPTION', value: cartridge.desc], [$class: 'StringParameterValue', name: 'CARTRIDGE_CLONE_URL', value: cartridge.url]]
     }
 
 }
@@ -339,17 +341,12 @@ loadCartridgeCollectionJob.with{
         String desc = data.cartridges[i].folder.description
         String folder = data.cartridges[i].folder.name
         String display_name = data.cartridges[i].folder.display_name
-        String downstream_folder = data.cartridges[i].cartridge.downstream_folder
-        if (downstream_folder == null) {
-            downstream_folder = "None"
-        }
 
         cartridges[i] = [
             'url' : url,
             'desc' : desc,
             'folder' : folder,
-            'display_name' : display_name,
-            'downstream_folder' : downstream_folder
+            'display_name' : display_name
         ]
     }
 
