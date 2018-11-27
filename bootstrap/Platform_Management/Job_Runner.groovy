@@ -4,7 +4,7 @@ def platformManagementFolderName= "/Platform_Management"
 def platformManagementFolder = folder(platformManagementFolderName) { displayName('Platform Management') }
 
 // Jobs
-def jobRunner = workflowJob(platformManagementFolderName + "/Job_Runner")
+def jobRunner = pipelineJob(platformManagementFolderName + "/Job_Runner")
 
 // Setup setup_cartridge
 jobRunner.with{

@@ -7,7 +7,7 @@ gitlabRootUrl = rootUrl.replaceAll("jenkins","gitlab")
 
 
 // Jobs
-def generateExampleWorkspaceJob = workflowJob(platformManagementFolderName + "/Generate_Example_Workspace")
+def generateExampleWorkspaceJob = pipelineJob(platformManagementFolderName + "/Generate_Example_Workspace")
 
 generateExampleWorkspaceJob.with{
     parameters{
