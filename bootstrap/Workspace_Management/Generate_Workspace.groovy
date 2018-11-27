@@ -1,12 +1,20 @@
 // Constants
-def platformToolsGitURL = "ssh://jenkins@gerrit:29418/platform-management"
+def platformToolsGitURL = "https://github.com/Accenture/adop-platform-management.git"
 
 def workspaceManagementFolderName= "/Workspace_Management"
 def workspaceManagementFolder = folder(workspaceManagementFolderName) { displayName('Workspace Management') }
 
+def adopPlatformManagementVersion = (binding.variables.containsKey("ADOP_PLATFORM_MANAGEMENT_VERSION")) ? "${ADOP_PLATFORM_MANAGEMENT_VERSION}".toString() : '';
+def adopPlatformManagementVersionRef = '${ADOP_PLATFORM_MANAGEMENT_VERSION}';
+
+if (!adopPlatformManagementVersion.matches("[a-fA-F0-9]{8,40}")) {
+  out.println("[WARN] ADOP_PLATFORM_MANAGEMENT_VERSION is set to '" + adopPlatformManagementVersion + "' which is not a valid hash - defaulting to '*/master'")
+  adopPlatformManagementVersionRef = '*/master';
+}
+
 // Jobs
 def generateWorkspaceJob = freeStyleJob(workspaceManagementFolderName + "/Generate_Workspace")
- 
+
 // Setup generateWorkspaceJob
 generateWorkspaceJob.with{
     parameters{
@@ -18,7 +26,10 @@ generateWorkspaceJob.with{
     label("ldap")
     wrappers {
         preBuildCleanup()
-        injectPasswords()
+        injectPasswords {
+            injectGlobalPasswords(true)
+            maskPasswordParameters(true)
+        }
         maskPasswords()
         environmentVariables {
             env('DC',"${LDAP_ROOTDN}")
@@ -52,12 +63,7 @@ ADMIN_USERS=$(echo ${ADMIN_USERS} | tr ',' ' ')
 DEVELOPER_USERS=$(echo ${DEVELOPER_USERS} | tr ',' ' ')
 VIEWER_USERS=$(echo ${VIEWER_USERS} | tr ',' ' ')
 
-# Gerrit
-for user in $ADMIN_USERS $DEVELOPER_USERS $VIEWER_USERS
-do
-        username=$(echo ${user} | cut -d'@' -f1)
-        ${WORKSPACE}/common/gerrit/create_user.sh -g http://gerrit:8080/gerrit -u "${username}" -p "${username}"
-done''')
+''')
         dsl {
             external("workspaces/jobs/**/*.groovy")
         }
@@ -72,7 +78,7 @@ done''')
                 url("${platformToolsGitURL}")
                 credentials("adop-jenkins-master")
             }
-            branch("*/master")
+            branch(adopPlatformManagementVersionRef)
         }
     }
-} 
+}

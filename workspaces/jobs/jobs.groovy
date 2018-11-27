@@ -1,5 +1,13 @@
 // Constants
-def platformToolsGitURL = "ssh://jenkins@gerrit:29418/platform-management"
+def platformToolsGitURL = "https://github.com/Accenture/adop-platform-management.git"
+
+def adopPlatformManagementVersion = (binding.variables.containsKey("ADOP_PLATFORM_MANAGEMENT_VERSION")) ? "${ADOP_PLATFORM_MANAGEMENT_VERSION}".toString() : '';
+def adopPlatformManagementVersionRef = '${ADOP_PLATFORM_MANAGEMENT_VERSION}';
+
+if (!adopPlatformManagementVersion.matches("[a-fA-F0-9]{8,40}")) {
+  out.println("[WARN] ADOP_PLATFORM_MANAGEMENT_VERSION is set to '" + adopPlatformManagementVersion + "' which is not a valid hash - defaulting to '*/master'")
+  adopPlatformManagementVersionRef = '*/master';
+}
 
 // Folders
 def workspaceFolderName = "${WORKSPACE_NAME}"
@@ -15,6 +23,7 @@ def generateProjectJob = freeStyleJob(projectManagementFolderName + "/Generate_P
 generateProjectJob.with{
     parameters{
         stringParam("PROJECT_NAME","","The name of the project to be generated.")
+        booleanParam('CUSTOM_SCM_NAMESPACE', false, 'Enables the option to provide a custom project namespace for your SCM provider')
         stringParam("ADMIN_USERS","","The list of users' email addresses that should be setup initially as admin. They will have full access to all jobs within the project.")
         stringParam("DEVELOPER_USERS","","The list of users' email addresses that should be setup initially as developers. They will have full access to all non-admin jobs within the project.")
         stringParam("VIEWER_USERS","","The list of users' email addresses that should be setup initially as viewers. They will have read-only access to all non-admin jobs within the project.")
@@ -25,7 +34,10 @@ generateProjectJob.with{
     }
     wrappers {
         preBuildCleanup()
-        injectPasswords()
+        injectPasswords {
+            injectGlobalPasswords(true)
+            maskPasswordParameters(true)
+        }
         maskPasswords()
         environmentVariables {
             env('DC',"${DC}")
@@ -60,18 +72,7 @@ set -e
 ADMIN_USERS=$(echo ${ADMIN_USERS} | tr ',' ' ')
 DEVELOPER_USERS=$(echo ${DEVELOPER_USERS} | tr ',' ' ')
 VIEWER_USERS=$(echo ${VIEWER_USERS} | tr ',' ' ')
-
-# Gerrit
-for user in $ADMIN_USERS $DEVELOPER_USERS $VIEWER_USERS
-do
-        username=$(echo ${user} | cut -d'@' -f1)
-        ${WORKSPACE}/common/gerrit/create_user.sh -g http://gerrit:8080/gerrit -u "${username}" -p "${username}"
-done''')
-        shell('''#!/bin/bash -ex
-# Gerrit
-source ${WORKSPACE}/projects/gerrit/configure.sh
-# Generate second permission repo with enabled code-review
-source ${WORKSPACE}/projects/gerrit/configure.sh -r permissions-with-review''')
+''')
         dsl {
             external("projects/jobs/**/*.groovy")
         }
@@ -86,7 +87,7 @@ source ${WORKSPACE}/projects/gerrit/configure.sh -r permissions-with-review''')
                 url("${platformToolsGitURL}")
                 credentials("adop-jenkins-master")
             }
-            branch("*/master")
+            branch(adopPlatformManagementVersionRef)
         }
     }
 }

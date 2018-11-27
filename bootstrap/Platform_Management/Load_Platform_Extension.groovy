@@ -34,7 +34,10 @@ loadPlatformExtensionJob.with{
     label("swarm")
     wrappers {
       preBuildCleanup()
-      injectPasswords()
+      injectPasswords {
+        injectGlobalPasswords(true)
+        maskPasswordParameters(true)
+      }
       maskPasswords()
       sshAgent("adop-jenkins-master")
       credentialsBinding {
